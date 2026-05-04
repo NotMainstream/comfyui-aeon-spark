@@ -11,7 +11,6 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: comfyui-ollama
-    runtime: nvidia
     deploy:
       resources:
         reservations:
@@ -58,7 +57,6 @@ services:
     hostname: comfyui-spark
 
     # GPU access (full unified-memory fabric on DGX Spark)
-    runtime: nvidia
     deploy:
       resources:
         reservations:

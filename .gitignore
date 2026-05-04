@@ -6,3 +6,24 @@ __pycache__/
 workflows.old/
 workflows.new/
 baked_models/
+
+# Session and output files
+SESSION_NOTES.md
+AUDIO_POLISH_TODO.md
+
+# Generated media — never commit videos or audio
+*.mp4
+*.mp3
+*.wav
+*.aac
+*.ogg
+*.mkv
+*.mov
+
+# Local outputs
+outputs/
+prompts/*.txt
+
+# OS noise
+.DS_Store
+Thumbs.db

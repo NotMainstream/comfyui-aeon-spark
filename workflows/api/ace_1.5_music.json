@@ -1,0 +1,154 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "acestep_v1.5_xl_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ace_1.5_vae.safetensors"
+    }
+  },
+  "3": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "qwen_0.6b_ace15.safetensors",
+      "clip_name2": "qwen_0.6b_ace15.safetensors",
+      "type": "ace",
+      "device": "default"
+    }
+  },
+  "4": {
+    "class_type": "TextEncodeAceStepAudio1.5",
+    "inputs": {
+      "clip": [
+        "3",
+        0
+      ],
+      "tags": "reggae tropical beach drums bass guitar keyboard relaxed happy island",
+      "lyrics": "",
+      "seed": 12345,
+      "bpm": 80,
+      "duration": 30.0,
+      "timesignature": "4",
+      "language": "en",
+      "keyscale": "D major",
+      "generate_audio_codes": false,
+      "cfg_scale": 5.0,
+      "temperature": 1.0,
+      "top_p": 0.9,
+      "top_k": 50,
+      "min_p": 0.0
+    }
+  },
+  "5": {
+    "class_type": "EmptyAceStep1.5LatentAudio",
+    "inputs": {
+      "seconds": 30.0,
+      "batch_size": 1
+    }
+  },
+  "6": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 12345
+    }
+  },
+  "7": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "4",
+        0
+      ]
+    }
+  },
+  "8": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "cfg": 1.0
+    }
+  },
+  "9": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "scheduler": "normal",
+      "steps": 30,
+      "denoise": 1.0
+    }
+  },
+  "10": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "11": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "6",
+        0
+      ],
+      "guider": [
+        "8",
+        0
+      ],
+      "sampler": [
+        "10",
+        0
+      ],
+      "sigmas": [
+        "9",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    }
+  },
+  "12": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "11",
+        0
+      ],
+      "vae": [
+        "2",
+        0
+      ]
+    }
+  },
+  "13": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "12",
+        0
+      ],
+      "filename_prefix": "ace_music_output",
+      "quality": "320k"
+    }
+  }
+}

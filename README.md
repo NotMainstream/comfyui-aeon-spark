@@ -577,7 +577,19 @@ docker compose down && docker start vllm-aeon-ultimate-v2   # back to vLLM
 ├── docker-compose.yml   # tuned for Grace-Blackwell unified memory
 ├── entrypoint.sh        # workspace bootstrap + model downloader + launch
 ├── download_models.py   # 28-artifact resumable downloader
-├── workflows/           # 8 .json files baked into the image
+├── workflows/           # 8 UI-format .json files baked into the image
+├── workflows/api/       # API-format .json workflows (for scripted generation)
+│   ├── ltx_t2v_pure.json   # pure text-to-video (no image conditioning)
+│   ├── ltx_i2v_api.json   # image-to-video with chaining support
+│   └── ltx_t2v_api_fixed.json  # pre-corrected API workflows
+├── prompts/             # curated LTX prompt library
+│   └── ltx_spiraling_library.txt  # production-tested prompt examples
+├── skills/              # AI agent skill files for movie production
+│   ├── ltx-movie-studio/    # end-to-end chain production pipeline
+│   ├── ltx-scenarist/       # prompt expansion + LTX prompt craft
+│   ├── ltx-director/        # orchestration + shot sequencing
+│   ├── ltx-cameraman/       # generation execution wrapper
+│   └── comfyui-spark-ltx/   # ComfyUI API operator skill
 ├── .env.example         # HF_TOKEN + tuning flags
 ├── README.md            # this file
 ├── AGENTS.md            # deployment guide for AI agents (Claude, Copilot, etc.)
@@ -589,7 +601,415 @@ docker compose down && docker start vllm-aeon-ultimate-v2   # back to vLLM
 
 If you're handing this to an AI agent (Claude, Copilot, Cursor, etc.) to deploy on a Spark you have SSH access to, point it at [`AGENTS.md`](AGENTS.md). It's structured top-to-bottom with pre-flight checks, single-block deployment commands, post-deploy validation, exact-fix matrices for common failures, hard "do not" guardrails, and a standard report-back template.
 
+---
+
+# 🎬 AI Movie Studio — LTX Video Production on DGX Spark
+
+This section documents the **AI movie studio skills package** built on top of the AEON-7 ComfyUI container — a complete pipeline for producing multi-segment, temporally-chained AI videos using LTX Video 2.3.
+
+> **Bottom line:** LTX 2.3 generates ~5 seconds per segment. For longer videos, you chain segments together by using the last frame of each segment as the seed image for the next. The result is a coherent, continuous movie.
+
+---
+
+## The Problem This Solves
+
+LTX 2.3 is a powerful video generation model, but it has real constraints:
+
+| Constraint | Impact |
+|---|---|
+| ~5 seconds per generation | Can't generate a 60-second scene in one shot |
+| No scene memory | Each segment is independent — lighting, character, camera can shift |
+| Static first frame | Each segment's first ~1.3s shows the seed image before moving |
+| Complex physics failures | Characters pass through thin barriers |
+| Audio is silent | LTX generates video only |
+
+The movie studio skills package works around these through **segment chaining**, **careful prompt engineering**, and **post-production assembly**.
+
+---
+
+## What We Built — and What It Does
+
+### The 5-Skill Suite
+
+The package is organized like a film crew, with separate skills for each role:
+
+```
+Human Producer
+     │
+     ▼
+ltx-director        ── orchestrates the whole production, writes shotlist
+     │
+     ├──▶ ltx-scenarist      ── expands "beach party scene" into full LTX prompt
+     │
+     └──▶ ltx-cameraman ────── executes generation via comfyui-spark-ltx
+                                     │
+                                     ▼
+                              ComfyUI / LTX 2.3
+                                     │
+                                     ▼
+                              .mp4 clip file
+```
+
+**`ltx-movie-studio`** — The master skill. End-to-end production from concept to finished movie. Calls the other skills automatically. Use this if you want the full pipeline.
+
+**`ltx-scenarist`** — Expands simple scene descriptions into full LTX prompts. Teaches the 6-element prompt structure: shot scale, scene, action, characters, camera movement, audio. Includes physical emotion cues, lighting reference, and camera language.
+
+**`ltx-director`** — Takes a shotlist and orchestrates generation. Manages chaining logic (extract last frame → use as next seed), shot ordering, and continuity.
+
+**`ltx-cameraman`** — Thin wrapper that delegates to comfyui-spark-ltx for actual ComfyUI API calls.
+
+**`comfyui-spark-ltx`** — The operator skill. Submits workflows to ComfyUI, polls for completion, copies outputs. Supports pure T2V (no image), I2V (with seed image), and chained modes.
+
+---
+
+## Quick Start — Generate Your First Video
+
+### 1. Verify ComfyUI is Running
+
+```python
+import requests
+r = requests.get("http://localhost:8188/system_stats", timeout=5)
+print(r.json())
+# Expected: {"version": "0.20.1", "devices": [{"name": "NVIDIA GB10"}]}
+```
+
+### 2. Generate a Clip
+
+```python
+import json, requests, uuid, subprocess
+
+HOST = "http://localhost:8188"
+WF_PATH = "/path/to/repo/workflows/api/ltx_t2v_pure.json"  # pure T2V
+OUTPUT_DIR = "/path/to/outputs/"
+
+with open(WF_PATH) as f:
+    wf = json.load(f)
+
+wf["2483"]["inputs"]["text"] = (
+    "Wide shot, cinematic -- a breathtaking tropical beach at golden hour. "
+    "Crystal clear turquoise water gently laps against pristine white sand. "
+    "Palm trees sway in a soft breeze. Warm golden sunlight bathes everything. "
+    "The audio: rhythmic waves, distant laughter, seagulls calling."
+)
+wf["2612"]["inputs"]["text"] = "blurry, low quality, distorted, deformed, ugly, bad anatomy"
+
+client_id = str(uuid.uuid4())
+r = requests.post(f"{HOST}/prompt", json={"prompt": wf, "client_id": client_id}, timeout=30)
+prompt_id = r.json()["prompt_id"]
+
+# Poll (takes ~2-5 min on GB10)
+import time
+for _ in range(120):
+    time.sleep(10)
+    r = requests.get(f"{HOST}/history/{prompt_id}", timeout=10)
+    if r.status_code == 200 and prompt_id in r.json():
+        if r.json()[prompt_id]["status"]["status_str"] == "success":
+            print("Done!")
+            break
+
+# Copy from container
+subprocess.run([
+    "docker", "cp",
+    "comfyui-spark:/workspace/ComfyUI/output/output_00001_.mp4",
+    f"{OUTPUT_DIR}/my_clip.mp4"
+])
+```
+
+### 3. Or — Use the Hermite Agent Skills Directly
+
+If you're running this via Hermes Agent (or another agent framework that supports skills), simply say:
+
+> *"Make me a 30-second tropical beach movie"*
+
+The `ltx-movie-studio` skill handles everything: shotlist, generation, chaining, trim, concat, and audio.
+
+---
+
+## API Workflow Files
+
+Three API-ready workflows are provided in `workflows/api/`:
+
+| File | Use When |
+|---|---|
+| `ltx_t2v_pure.json` | **Opening shot only** — pure text-to-video, no image conditioning. Both I2V nodes are bypassed. |
+| `ltx_i2v_api.json` | **All chained segments** — feed a seed image in. Pre-fixed for API use (see below). |
+| `ltx_t2v_api_fixed.json` | Reference copy with all API fixes documented inline. |
+
+### Required API Fixes (already applied to the provided workflows)
+
+When using the UI-format workflows via the ComfyUI API, three nodes need explicit fixes:
+
+**1. `LoadImage` node (ID 2004)** — The `image` widget must be set to an actual filename present in the container's `workspace/input/` directory:
+
+```python
+wf["2004"]["inputs"]["image"] = "my_seed_image.png"
+```
+
+**2. `COMFY_DYNAMICCOMBO_V3` / `ResizeImageMaskNode` (ID 4010)** — This node is broken when called via API. Pre-replaced in the provided workflows with a standard `ImageScale` node (ID 9990, 1536×1536, lanczos).
+
+**3. `LTXVPreprocess` (ID 3336)** — Must include the `img_compression` widget set to `3`:
+
+```python
+wf["3336"]["inputs"]["img_compression"] = 3
+```
+
+---
+
+## The Chaining Protocol (Critical for Coherent Videos)
+
+LTX has no scene memory. Each generation is independent. To make a coherent multi-segment video, we chain segments: **the last frame of segment N becomes the seed image for segment N+1**.
+
+```
+S01: T2V (no seed) ──▶ video_s01.mp4
+      │
+      │ ffmpeg -y -sseof -0.1 -i video_s01.mp4 -frames:v 1 -q:v 2 /tmp/frame_s01.png
+      │ docker cp /tmp/frame_s01.png comfyui-spark:/workspace/ComfyUI/input/segment_01.png
+      ▼
+S02: I2V (seed=segment_01.png, strength=1.0) ──▶ video_s02.mp4
+      │
+      │ ffmpeg -y -sseof -0.1 -i video_s02.mp4 -frames:v 1 -q:v 2 /tmp/frame_s02.png
+      ▼
+S03: I2V (seed=segment_02.png, strength=1.0) ──▶ video_s03.mp4
+      ... repeat ...
+```
+
+### Chaining Parameters
+
+| Parameter | Value | Why |
+|---|---|---|
+| `strength` on I2V node | **1.0** | Maximum continuity — seed image fully determines first frame |
+| ImageScale size | 1536×1536 | Matches latent aspect ratio |
+| Frame extract timing | `-sseof -0.1` | 0.1s before end to get the last real frame |
+| Container input path | `/workspace/ComfyUI/input/` | Where seed images must live |
+
+---
+
+## Post-Production Pipeline
+
+After all segments are generated and concatenated:
+
+### Step 1: Trim Static First Frames ⚠️
+
+**Every LTX segment has ~1.3 seconds of static first frame** — the seed image lingers before motion begins. You must remove this from ALL segments (including S01):
+
+```bash
+for i in 01 02 03 04 05 06 07 08 09 10; do
+  ffmpeg -y -ss 1.3 -i beach_s${i}.mp4 -c copy beach_s${i}_trimmed.mp4
+done
+```
+
+After trim: 5.0s → 3.7s usable per segment. 10 segments ≈ 37 seconds.
+
+### Step 2: Crop to 16:9
+
+LTX outputs 1920×1088. Crop the extra 8 pixels:
+
+```bash
+ffmpeg -y -i concat_trimmed.mp4 \
+  -vf "crop=1920:1080:0:4" \
+  -c:v libx264 -preset medium -crf 18 \
+  video_1080p.mp4
+```
+
+### Step 3: Audio
+
+**Option A — MiniMax Music API (recommended, cleanest)**
+
+Generate a full music track via the [MiniMax API](https://www.minimax.io):
+
+```bash
+# Requires: pip install requests
+python3 << 'EOF'
+import json, codecs, urllib.request, os
+
+# Get key from ~/.hermes/.env (your agent's environment)
+with open(os.path.expanduser("~/.hermes/.env")) as f:
+    for line in f:
+        if line.startswith("MINIMAX_API_KEY="):
+            key = line.strip().split("=", 1)[1].strip()
+            break
+
+url = "https://api.minimax.io/v1/music_generation"
+payload = {
+    "model": "music-2.6",  # NOT music-2.6-free (unsupported)
+    "prompt": "Reggae tropical beach bar Bob Marley style upbeat steel drums bass guitar happy vibes",
+    "is_instrumental": True,
+    "stream": True,
+    "audio_setting": {"sample_rate": 44100, "bitrate": 256000, "format": "mp3"}
+}
+
+req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+    method="POST")
+
+with urllib.request.urlopen(req, timeout=300) as resp:
+    for chunk in resp:
+        text = chunk.decode("utf-8", errors="replace")
+        for line in text.split("\n"):
+            if line.startswith("data: "):
+                obj = json.loads(line[6:])
+                if obj.get("data", {}).get("audio"):
+                    audio_hex = obj["data"]["audio"]
+                    audio_bytes = codecs.decode(audio_hex, "hex")
+                    with open("/tmp/reggae_music.mp3", "wb") as f:
+                        f.write(audio_bytes)
+                    print("Saved 160s reggae track!")
+                    break
+EOF
+```
+
+Key notes:
+- Model must be `music-2.6` — `music-2.6-free` returns `{"error": {"message": "not supported on your current plan"}}`
+- Generation takes ~120–240 seconds even with streaming mode
+- Generate a track 60–180s long (longer than your movie), then trim + fade
+
+**Option B — Synthesize Ambient Sound** (requires scipy)
+
+If you want layered scene audio (waves, birds, crowd), use the hermes venv Python which has scipy:
+
+```python
+# Run via: /home/a/.hermes/hermes-agent/venv/bin/python
+# execute_code sandbox does NOT have scipy
+from scipy.signal import butter, filtfilt
+```
+
+⚠️ **Known audio issue:** Without scipy, the crude RC filter approximation used in execute_code produces audible white noise and ticking artifacts. Use MiniMax music only, or use the hermes venv Python with scipy.
+
+### Step 4: Mux and Deliver
+
+```bash
+# Mix audio
+ffmpeg -y -i video_1080p.mp4 -i mixed_audio.aac \
+  -c:v copy -c:a aac -b:a 192k -shortest output_final.mp4
+
+# Compress for Telegram/sharing
+ffmpeg -y -i output_final.mp4 \
+  -c:v libx264 -preset fast -crf 22 -b:v 2M \
+  -c:a aac -b:a 128k \
+  output_compressed.mp4
+```
+
+---
+
+## Known Problems — Help Wanted
+
+We're documenting these openly because they'd benefit from community expertise:
+
+### 🔴 Problem 1: Static Seed Image Lingers at Segment Start
+
+**What happens:** Every LTX segment shows ~1.3 seconds of the seed image as a static first frame before motion begins. We remove this with `ffmpeg -ss 1.3`, but that wastes ~26% of each segment.
+
+**What's been tried:**
+- Reducing I2V `strength` — does NOT remove the image influence (the pipeline is structurally I2V; only `bypass=True` on the conditioning nodes removes it, but then you get no image guidance at all)
+- Using pure T2V for all segments — eliminates the seed image issue, but loses visual continuity between segments
+
+**Looking for help with:**
+- Finding a way to suppress the static first-frame without losing I2V continuity benefits
+- Understanding whether this is a ComfyUI-LTXVideo node behavior or inherent to the LTX model
+- Alternative chaining strategies that don't waste 1.3s per segment
+
+### 🔴 Problem 2: Audio Synthesis Produces White Noise and Ticking
+
+**What happens:** Synthesized ambient audio (ocean waves, birds, crowd noise) using numpy-only filtering in the execute_code sandbox produces audible white noise and a regular ticking sound.
+
+**What's been tried:**
+- RC lowpass filter approximation — produces the ticking artifact
+- Various filter parameters — artifact persists
+
+**Looking for help with:**
+- A clean ambient sound synthesis approach that works in the constrained environment
+- The MiniMax music API workaround is functional but requires an API key and adds 2–4 minutes of generation time
+- Ideally: a scipy-equivalent filter accessible from the sandbox, or a better ambient synthesis approach
+
+### 🟡 Problem 3: Narrow / Compressed People in Some Segments
+
+**What happens:** Some segments show people that look unnaturally thin or horizontally compressed. This appears to be related to the 1920×1088 (non-16:9) output aspect ratio — the latent space is 960×544, which decodes to 1920×1088.
+
+**What's been tried:**
+- Cropping to 1920×1080 helps slightly but doesn't fix the compression in the latent itself
+
+**Looking for help with:**
+- Understanding whether this is a latent decoding issue or a model generation issue
+- Whether adjusting latent dimensions could fix the aspect ratio
+
+---
+
+## LTX Prompting Guide
+
+See **`skills/ltx-scenarist/SKILL.md`** for the full guide. Key points:
+
+**6 elements every LTX prompt must include:**
+1. **Shot scale** — EWS, WS, MS, CU, ECU
+2. **Scene** — specific location, time of day, lighting, atmosphere
+3. **Action** — specific physical action in present tense, simple physics
+4. **Characters** — appearance + **physical emotion cues** (NOT "sad" — write "shoulders slump, eyes cast down")
+5. **Camera** — movement type relative to subject, described in natural language
+6. **Audio** — ambient sounds, music, dialogue
+
+**Golden rules:**
+- Physical cues over emotion labels ("her eyes narrow" not "she's suspicious")
+- Simple single-threaded physics (no complex multi-object collision)
+- Natural camera language ("camera follows her" not "dolly 2ft right at 30deg/sec")
+- Be detailed — more description = better output
+- 1–3 characters per shot
+
+---
+
+## Segment Length Compensation
+
+To get more usable content after the 1.3s trim, generate more latent frames:
+
+| Latent Frames | Output (~24fps) | After 1.3s Trim | Node 3059 `"length"` |
+|---|---|---|---|
+| 121 (default) | ~5.0s | ~3.7s | `"length": 121` |
+| 161 (+40) | ~6.7s | ~5.4s | `"length": 161` |
+| 201 (+80) | ~8.4s | ~7.1s | `"length": 201` |
+
+Edit workflow node `3059` (`EmptyLTXVLatentVideo`) to change `"length"` from 121.
+
+---
+
+## Calling the Skills from Hermes Agent
+
+If you have a Hermes Agent setup, copy the `skills/` directory to `~/.hermes/skills/creative/`:
+
+```bash
+cp -r /path/to/repo/skills/* ~/.hermes/skills/creative/
+```
+
+Then tell the agent:
+
+> *"I want to make a 45-second tropical beach movie with a beach bar scene and a bonfire"*
+
+The agent will load `ltx-movie-studio`, create a shotlist, expand each prompt via `ltx-scenarist`, generate clips via `comfyui-spark-ltx`, chain them, assemble the movie, and compose audio.
+
+---
+
+## Contributing
+
+This is experimental. The LTX model, ComfyUI nodes, and our techniques are all evolving. Contributions welcome:
+
+- **Prompt engineering** — better prompts, new scene types, camera movement recipes
+- **Post-production** — cleaner audio synthesis, ffmpeg workflows, music generation
+- **ComfyUI node expertise** — better understanding of the I2V conditioning mechanics
+- **LTX model tricks** — longer segments, better motion quality, physics fixes
+
+Open an issue or PR. Please read the [LTX Video documentation](https://docs.ltx.video) and the [ComfyUI-LTXVideo node reference](https://github.com/Lightricks/ComfyUI-LTXVideo) before proposing changes to the workflow structure.
+
+---
+
 ## License
+
+MIT. The AEON-7 ComfyUI distribution and movie studio skills are open source.
+
+**Model licenses remain with their authors:**
+- LTX 2.3 — [Lightricks Open Weights](https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE)
+- FLUX.2-dev — [FLUX.2 Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-dev/blob/main/LICENSE)
+- MiniMax Music API — subject to [MiniMax terms of service](https://www.minimax.io)
+
+---
+
+
 
 MIT. Bundled custom-node packs and model weights retain their respective
 upstream licenses (Apache 2.0 / MIT / FLUX Non-Commercial / etc).

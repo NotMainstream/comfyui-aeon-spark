@@ -1,0 +1,27 @@
+# LTX Video Prompt — Spiraling Library
+# Model: ltx-2.3-22b-dev (2-stage T2V)
+# Workflow: 03_ltx2.3_T2V_two_stage (with ImageScale fix)
+# Input: example.png (replace with custom starting image)
+# Render time on GB10: ~5 minutes
+
+## Prompt
+Starting from the spiraling mahogany walkway. 0-6s: The bookish adventurer winds the key on her mechanical lantern; it flares to life with a warm cognac glow that pushes amber light across the polished mahogany and brass railings. She looks up the spiraling atrium. Camera is low-angle looking up the spiral, slowly craning upward to reveal the impossible vertical scale of living bookshelves stretching into warm golden haze. Three leather-bound books with paper wings flutter past in the foreground, leaving trails of warm parchment-light that fade like sparkler embers. Her expression: quiet anticipation, eyes widening slightly, pupils catching the lantern flare.
+
+6-14s: She begins walking up the spiraling walkway. The camera tracks beside her at medium distance while simultaneously craning upward, creating a spiraling camera path that mirrors the architecture. Dozens of books take flight from the shelves, their paper wings beating with overlapping action on staggered timing—each book moves on a slightly different flutter rhythm, creating a living swarm rather than synchronized movement. The books leave ink-sparkle trails that swirl in the warm air. Dust motes dance in the light beams, each mote on its own lazy independent drift path. Her hair and messenger bag strap bounce with follow-through motion lagging 4 frames behind her stride. She reaches out to let a small poetry book brush her fingertips, and it leaves a smudge of warm gold ink on her skin that glows faintly.
+
+14-20s: She stops at a brass railing, leaning over to look down into the infinite depth below. The camera pushes in past her shoulder to reveal the vertiginous drop, then whips back up as a massive atlas-book with broad paper wings swoops down from the upper shelves. Its wing-shadow flits across the stained-glass window, momentarily darkening the ruby and amber geometric patterns cast across the floor and her face. She gasps—expression shifting from awe to pure wonder—and reaches out. The atlas hovers, pages riffling with secondary motion, releasing a burst of ink-sparkles that catch the lantern light and glow like warm fireflies in the cognac-toned air.
+
+20-25s: The camera slowly orbits 60 degrees around her as she raises the lantern toward the hovering atlas. The lantern's warm glow and the stained-glass ruby/amber patterns mix on her face, creating dynamic color bleeding that shifts across her skin as the orbit progresses. She smiles, a crooked, curious grin. The ink-sparkles spiral around the lantern in a helix formation, their light reflecting in her large expressive eyes. Camera dollies in for an extreme close-up of her eyes, which reflect the infinite spiraling bookshelves above. A single dust mote drifts through the frame in foreground, shallow depth of field keeping it creamy. Final hold: the mechanical lantern ticks softly, its glow pulsing once, and a distant rolling ladder rumbles along its brass track.
+
+## Negative Prompt
+pc game, console game, video game, cartoon, childish, ugly
+
+## Settings
+- Resolution: 960x544 (stage 1), upscaled by latent upsampler
+- Frames: 121 (stage 1)
+- FPS: 24
+- Sampler: euler_ancestral_cfg_pp (stage 1), euler_cfg_pp (stage 2)
+- CFG: 1.0
+- LoRA: ltx-2.3-22b-distilled-lora-384-1.1.safetensors @ 0.5 strength
+- Strength (img2vid): 0.7 (stage 1), 1.0 (stage 2)
+- Seeds: 43 (video), 42 (audio latent)
